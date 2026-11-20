@@ -1,375 +1,177 @@
-
 # 🛡️ AgentShield
 
 ### Secure-by-Design Enterprise AI Agents
 
 **Building enterprise AI agents with security engineered into the architecture—not added after deployment.**
 
-AgentShield is a hands-on AI engineering and security project focused on designing, building, and securing an enterprise AI agent using Microsoft Foundry, Retrieval-Augmented Generation (RAG), Azure, and DevSecOps practices.
+AgentShield is a hands-on AI security engineering project exploring how organizations can build AI agents that retrieve enterprise knowledge, interact with business systems, and execute workflows within clearly defined security boundaries.
 
-The project explores how organizations can safely adopt AI agents that retrieve enterprise knowledge, interact with business systems, and execute authorized workflows without compromising identity, data security, or operational control.
+The project uses **Microsoft Foundry, Python, and ServiceNow** to implement an HR/IT assistant for a fictional company, **Northstar Technologies**. It combines practical agent development with the security engineering questions that arise when an AI system moves from *answering questions* to *taking actions*.
 
-> **Core principle:** An AI agent should never have more authority than the user or business process it represents.
+> **Core principle:** A model's ability to request an action is not authorization to execute it. Trusted application code must enforce permissions and verify the outcome.
 
----
+## The business problem
 
-## 🎯 The Business Problem
+Employees often move between HR portals, IT support systems, and internal documentation to complete routine tasks. An AI assistant could simplify those interactions: an employee might ask about a remote-work policy or request a ticket for a laptop that will not start.
 
-Organizations are increasingly exploring AI agents to automate repetitive tasks, improve employee productivity, and streamline business operations.
+But connecting an agent to enterprise knowledge and APIs creates important questions:
 
-Consider a fictional enterprise, **Northstar Technologies**, with approximately 5,000 employees.
+- Can the requester access the information the agent retrieves?
+- Who authorizes a requested action: the model, the application, or the downstream system?
+- What permissions does the integration identity hold?
+- How does the system prevent prompt injection, excessive agency, and unauthorized tool use?
+- How can the application distinguish a successful operation from a convincing but incorrect AI response?
 
-Employees regularly contact HR and IT to:
+**AgentShield explores these questions through implementation, testing, and documented engineering decisions.**
 
-- Retrieve onboarding documentation and company policies.
-- Request access to applications and internal resources.
-- Submit IT support requests.
-- Navigate employee onboarding procedures.
-- Coordinate tasks across departments.
+## Current implementation
 
-Traditional workflows often involve multiple systems, manual approvals, and repetitive administrative work.
+The working prototype connects an existing **Microsoft Foundry HR/IT agent** to **ServiceNow** through a **local Python client**.
 
-An AI agent could simplify these interactions by allowing employees to make requests through natural language.
+| Capability | Current status |
+| --- | --- |
+| Foundry HR/IT agent with synthetic policy knowledge and file search | Configured; policy-answer testing previously reported |
+| `create_incident` function tool on `AgentShield-HR-IT` version 4 | Implemented; tool request observed |
+| Python client handling function calls and returning tool results | Implemented and tested |
+| ServiceNow OAuth 2.0 client-credentials token acquisition | Implemented and tested |
+| ServiceNow incident creation via REST API | Implemented and tested |
+| End-to-end Foundry → Python → ServiceNow incident creation | **Verified** |
+| Employee authentication and per-user authorization | Not implemented |
+| Hosted FastAPI execution, approvals, monitoring, and deployment controls | Planned |
 
-However, introducing AI agents creates new security challenges.
+**Verified demonstration:** A test request about a laptop that would not turn on resulted in a ServiceNow incident. The agent returned ticket number **`INC0010019`**, and the incident was confirmed in ServiceNow.
 
-**What happens when an AI agent can retrieve sensitive information or perform actions across enterprise systems?**
+This result proves the core integration works in the tested local environment. It does **not** establish that the application is production-ready or that employee-level authorization is enforced.
 
-Organizations must consider:
-
-- How the agent authenticates employees.
-- Whether retrieved documents respect existing user permissions.
-- How the agent's own permissions are controlled.
-- Whether malicious prompts can manipulate tool execution.
-- Which actions require human approval.
-- How agent activity is monitored and investigated.
-- How security controls are enforced throughout the deployment lifecycle.
-
-AgentShield is designed to explore and address these challenges.
-
----
-
-## 🚀 Project Objectives
-
-AgentShield focuses on three interconnected engineering disciplines.
-
-### 1. AI Agent Engineering
-
-Design an enterprise AI agent capable of:
-
-- Understanding employee requests using large language models.
-- Retrieving relevant enterprise documents using RAG.
-- Providing grounded responses based on authorized information.
-- Interacting with business applications through APIs.
-- Executing bounded, multi-step workflows.
-- Handling errors and requests requiring human intervention.
-
-### 2. Secure AI Architecture
-
-Implement security controls covering:
-
-- User authentication and identity propagation.
-- Role-based and resource-level authorization.
-- Least-privilege agent identities.
-- Secure retrieval and data access.
-- Protected tool and API execution.
-- Human-in-the-loop approvals.
-- Prompt-injection and tool-misuse defenses.
-- Network isolation and secrets management.
-
-### 3. AI Security Operations and DevSecOps
-
-Develop capabilities for:
-
-- Agent activity logging and tracing.
-- Detection of suspicious or unauthorized behavior.
-- AI-specific security evaluations.
-- Automated infrastructure security checks.
-- CI/CD security gates.
-- Incident investigation and response.
-
----
-
-## 🏗️ Proposed Architecture
-
-The architecture separates the AI agent's reasoning capabilities from the security controls responsible for enforcing authorization and executing business actions.
+## Implemented architecture
 
 ```mermaid
-flowchart TD
-    A["Employee"] --> B["Application Interface"]
-    B --> C["Microsoft Entra ID"]
-    C --> D["AI Agent - Microsoft Foundry"]
+sequenceDiagram
+    actor U as Tester
+    participant P as Local Python client
+    participant A as Microsoft Foundry agent (v4)
+    participant S as ServiceNow REST API
 
-    D --> E["RAG Retrieval Service"]
-    E --> F["Authorized Document Search"]
-
-    D --> G["Protected Tool Gateway"]
-    G --> H["Authentication and Authorization"]
-    H --> I{"Approval Required?"}
-
-    I -->|Yes| J["Human Approval"]
-    I -->|No| K["Business Action API"]
-    J -->|Approved| K
-    J -->|Rejected| L["Action Denied"]
-
-    K --> M["IT Ticketing System"]
-
-    D -.-> N["Observability and Security Monitoring"]
-    G -.-> N
-    K -.-> N
-
-    O["Terraform and CI/CD Security Controls"] -.-> D
-    O -.-> G
+    U->>P: Request an IT support ticket
+    P->>A: Send prompt and agent reference
+    A-->>P: create_incident(arguments, call_id)
+    P->>S: Request OAuth access token
+    S-->>P: Access token
+    P->>S: POST /api/now/table/incident
+    S-->>P: Incident record and number
+    P->>A: FunctionCallOutput(result, call_id)
+    A-->>P: Final response with ticket number
+    P-->>U: Display response
 ```
 
-### Architecture Principles
+### How the execution boundary works
 
-**Identity-aware access**
+The Foundry agent identifies a tool it wants to call and supplies structured arguments. **It does not execute the local Python function itself.** The Python client reads the function call, invokes `create_incident()` in `servicenow.py`, and sends the result back to the agent using the matching `call_id`.
 
-Every request must be associated with a trusted identity. The system should enforce authorization based on the user's permissions and the action being requested.
+The local client uses `DefaultAzureCredential` to authenticate to the Foundry project. The ServiceNow integration separately uses OAuth client credentials. **Neither mechanism, by itself, verifies the identity or permissions of the employee who typed the request.** That boundary is a priority for the next security iteration.
 
-**Secure retrieval**
+See [Architecture](docs/architecture.md) for component responsibilities, data flows, and the proposed secure deployment design.
 
-RAG must not become a mechanism for bypassing enterprise document permissions. Authorization must be enforced by trusted application and retrieval components.
+## Security engineering approach
 
-**Least-privilege tool execution**
+The goal is to place security decisions in components that can enforce them, rather than relying on model instructions alone.
 
-AI agents should only access approved tools and perform actions within explicitly defined permissions.
+| Security principle | Engineering implication |
+| --- | --- |
+| Identity-aware access | Authenticate the requester and establish a trusted identity outside the model |
+| Least privilege | Restrict the permissions of users, applications, and downstream integration identities |
+| Independent authorization | Validate tool requests against backend policy before performing business actions |
+| Secure retrieval | Apply document access controls; treat retrieved content as untrusted data |
+| Verifiable outcomes | Check downstream responses before reporting that an action succeeded |
+| Defense in depth | Combine validation, approvals, secrets management, monitoring, and testing |
 
-**Independent security enforcement**
+These are **design principles**, not a claim that every control is already implemented. The current prototype successfully creates incidents, but it still requires stronger authorization, validation, error handling, duplicate-request protection, and operational safeguards.
 
-Security decisions must not depend solely on LLM instructions. Authentication, authorization, input validation, and approval requirements must be enforced outside the model.
+A particularly useful finding from testing: a simulated tool response led the agent to claim a ticket had been created. That reinforced the need to verify outcomes in trusted code and avoid treating natural-language confirmations as proof.
 
-**Defense in depth**
+See [Security Findings](docs/security-findings.md) for observed risks, planned mitigations, and implementation status.
 
-Security controls must complement one another across identity, networking, data access, tool execution, monitoring, and deployment.
+## Technology stack
 
----
+| Area | Technology | Role |
+| --- | --- | --- |
+| AI agent | Microsoft Foundry; `gpt-4.1-mini` | HR/IT assistant and function-call generation |
+| Knowledge retrieval | Foundry file search | Synthetic HR/IT policy knowledge |
+| Application | Python | Local orchestration and tool execution |
+| Azure authentication | `DefaultAzureCredential` | Authenticating the Python client to Foundry |
+| Enterprise integration | ServiceNow REST API | Creating IT incidents |
+| API authentication | OAuth 2.0 client credentials | Obtaining a ServiceNow access token |
+| Planned application API | FastAPI | Protected backend endpoints |
+| Planned cloud and security tooling | Microsoft Entra ID, Azure Key Vault, Azure hosting, Terraform, monitoring and CI/CD tools | Future security controls and deployment |
 
-## 🧰 Planned Technology Stack
+## Development roadmap
 
-| Category | Technologies |
-|---|---|
-| AI Platform | Microsoft Foundry |
-| AI Engineering | LLMs, RAG, Agent Orchestration |
-| Programming | Python, FastAPI |
-| Retrieval | Azure AI Search |
-| Identity | Microsoft Entra ID, Managed Identities |
-| API Security | Azure API Management |
-| Tool Integration | REST APIs, Model Context Protocol (MCP) |
-| Infrastructure | Microsoft Azure, Terraform |
-| Secrets Management | Azure Key Vault |
-| Monitoring | Azure Monitor, Log Analytics |
-| DevSecOps | GitHub Actions, Checkov |
-| Security Frameworks | OWASP GenAI Security Guidance, NIST AI RMF |
+The project is being built incrementally. The immediate priority is **securing the working integration before expanding its privileges or deployment scope**.
 
-Technology choices may evolve as implementation requirements and platform capabilities are validated.
+| Workstream | Status |
+| --- | --- |
+| Existing Foundry agent and HR/IT knowledge retrieval | Configured |
+| Function-calling round trip with a mock function | Tested |
+| Live local Python-to-ServiceNow incident integration | **Tested end to end** |
+| Runtime input validation and reliable failure handling | Improvements identified |
+| FastAPI integration and authenticated backend endpoints | Planned |
+| Employee identity, action-level authorization, and least privilege | Planned |
+| Approval gates and duplicate-action protection | Planned |
+| Prompt-injection testing, audit logging, and monitoring | Planned |
+| Secure cloud infrastructure and CI/CD controls | Planned |
 
----
+The longer-term target is an agent architecture in which the interface, agent, trusted backend, identity provider, and business systems have explicit trust boundaries. The target design is documented separately from the current working implementation.
 
-## 🧪 Enterprise Use Cases
+## Repository and documentation
 
-### Use Case 1: Enterprise Knowledge Retrieval
+The primary implementation files are:
 
-**Scenario**
+- `src/foundry_client.py` — communicates with the Foundry agent, handles tool calls, and returns tool results.
+- `src/servicenow.py` — obtains a ServiceNow OAuth token and creates incidents through the Table API.
 
-An employee asks:
+Documentation:
 
-> "What is the company's remote work policy?"
+| Document | Contents |
+| --- | --- |
+| [Week 1 Build](docs/week-01.md) | What was built, how the integration evolved, and what was learned |
+| [Architecture](docs/architecture.md) | Current and target architectures, request flows, and trust boundaries |
+| [Engineering Decisions](docs/decisions.md) | Design choices, alternatives, and tradeoffs |
+| [Debugging Log](docs/debugging-log.md) | Failures, root causes, fixes, and verification |
+| [Security Findings](docs/security-findings.md) | Risks, observed behavior, and proposed controls |
+| [Testing](docs/testing.md) | Test scenarios, outcomes, and remaining validation |
 
-The agent retrieves relevant company documentation and generates a grounded response.
+## Running the local prototype
 
-**Security considerations**
+**Prerequisites:** Access to a configured Microsoft Foundry project containing `AgentShield-HR-IT` version 4 with the `create_incident` function tool; an authorized Azure identity; and a ServiceNow instance configured for the integration's OAuth client-credentials flow and incident creation.
 
-- Document-level access controls.
-- Secure retrieval.
-- Source attribution.
-- Prevention of unauthorized information disclosure.
+1. Create and activate a Python virtual environment.
+2. Install the recorded dependencies from `requirements.txt`.
+3. Copy `.env.example` to `.env` and supply the required configuration values.
+4. Authenticate locally to Azure using an identity permitted to access the Foundry project.
+5. Run the client from the repository root:
 
-### Use Case 2: Employee Onboarding Assistance
+   ```bash
+   python src/foundry_client.py
+   ```
 
-**Scenario**
+6. Enter a **synthetic test request** and verify the result in the test ServiceNow instance.
 
-A new employee asks:
+**Important:** The current Python client assumes the Foundry agent and its tools have already been provisioned. The complete from-scratch provisioning procedure and clean-environment replication are not yet validated. Do not use production employee data or credentials for this exercise.
 
-> "I'm joining the Cloud Security team next Monday. What do I need to complete before my first day?"
+## Project scope and limitations
 
-The agent identifies relevant onboarding requirements and assists with permitted tasks.
+AgentShield is an independent engineering portfolio project using a fictional enterprise and synthetic knowledge documents. A real incident was created in a test ServiceNow environment, but this does not make the implementation suitable for production workloads.
 
-**Security considerations**
+The current implementation lacks employee-level authorization, end-to-end approval enforcement, comprehensive input validation, duplicate-action prevention, and production-grade monitoring. Those controls are part of the ongoing engineering work and will only be marked as implemented when tested.
 
-- Identity verification.
-- Scoped access to employee information.
-- Workflow authorization.
-- Human approval for privileged actions.
-
-### Use Case 3: IT Support Automation
-
-**Scenario**
-
-An employee asks:
-
-> "Create an IT ticket because I cannot access my assigned application."
-
-The agent gathers required information and invokes an approved IT ticket API.
-
-**Security considerations**
-
-- Tool allowlisting.
-- Input validation.
-- API authentication and authorization.
-- Audit logging.
-- Protection against unauthorized tool execution.
-
----
-
-## 🔐 Security Engineering Focus
-
-AgentShield explores security threats specific to enterprise AI agents.
-
-| Threat | Security Objective |
-|---|---|
-| Prompt Injection | Prevent untrusted instructions from bypassing system controls |
-| Sensitive Data Disclosure | Enforce authorized access to enterprise information |
-| Excessive Agency | Limit agent capabilities and permissions |
-| Tool Misuse | Validate and authorize tool execution |
-| Privilege Escalation | Prevent unauthorized access or actions |
-| Insecure API Integration | Protect downstream business systems |
-| Credential Exposure | Secure identities, credentials, and secrets |
-| Insufficient Monitoring | Provide traceability and actionable security telemetry |
-
-The project will use synthetic data and simulated enterprise systems to test these scenarios safely.
-
----
-
-## 🗺️ Implementation Roadmap
-
-| Phase | Engineering Focus | Target Deliverable |
-|---|---|---|
-| 01 | AI Agent Development | Functional enterprise AI agent |
-| 02 | Identity and Authorization | Access-control test suite |
-| 03 | Secure Cloud Infrastructure | Terraform security baseline |
-| 04 | Secure Tools and MCP | Protected tool execution gateway |
-| 05 | AI Red Teaming | Adversarial security assessment |
-| 06 | Detection and Response | Monitoring and detection capabilities |
-| 07 | AI DevSecOps | Automated deployment security gates |
-| 08 | Integration and Validation | End-to-end demonstration and documentation |
-
-Each phase builds on the previous implementation, with security controls introduced and tested throughout the project.
-
----
-
-## 🧭 Engineering Methodology
-
-AgentShield follows a problem-driven engineering approach:
-
-1. **Define the business requirement** — Identify the enterprise problem and expected outcome.
-2. **Research the technology** — Understand relevant services, capabilities, and limitations.
-3. **Design the architecture** — Evaluate implementation options, dependencies, and security boundaries.
-4. **Implement the solution** — Develop the application and supporting infrastructure.
-5. **Validate functionality** — Test expected behavior, failures, and edge cases.
-6. **Assess security** — Identify and test potential attack paths.
-7. **Document decisions** — Record architecture, tradeoffs, findings, and improvements.
-
-The objective is not simply to create a working AI agent, but to demonstrate how engineering decisions affect its security, reliability, and operational readiness.
-
----
-
-## 📂 Repository Organization
-
-As development progresses, the repository will contain:
-
-```text
-AgentShield/
-│
-├── README.md
-│
-├── agent/
-│   └── AI agent implementation
-│
-├── knowledge/
-│   └── Synthetic enterprise documents
-│
-├── api/
-│   └── Simulated business APIs
-│
-├── infrastructure/
-│   └── Terraform and Azure configuration
-│
-├── tests/
-│   └── Functional and security tests
-│
-├── docs/
-│   ├── architecture/
-│   ├── threat-models/
-│   ├── engineering-decisions/
-│   └── implementation-notes/
-│
-└── .github/
-    └── workflows/
-```
-
-Components will be added as they are developed and validated.
-
----
-
-## 🎬 Planned Demonstration Scenarios
-
-The final project aims to demonstrate:
-
-**Authorized Knowledge Retrieval**
-
-An employee retrieves company information within their assigned permissions.
-
-**Unauthorized Data Access**
-
-An employee attempts to retrieve restricted HR information, and the system denies access.
-
-**Protected Business Actions**
-
-An AI agent invokes an approved API while respecting authorization and approval requirements.
-
-**Prompt-Injection Resistance**
-
-Malicious instructions embedded in untrusted content are tested against independent security controls.
-
-**Security Monitoring and Investigation**
-
-Suspicious agent activity generates telemetry that supports detection, investigation, and response.
-
-**Secure Deployment**
-
-Automated security checks identify and block defined infrastructure and application security violations before deployment.
-
----
-
-## 📚 References
-
-- [Microsoft Foundry Documentation](https://learn.microsoft.com/en-us/azure/ai-foundry/)
-- [Azure AI Search — Retrieval-Augmented Generation](https://learn.microsoft.com/en-us/azure/search/retrieval-augmented-generation-overview)
-- [Microsoft Entra Documentation](https://learn.microsoft.com/en-us/entra/)
-- [Azure API Management Documentation](https://learn.microsoft.com/en-us/azure/api-management/)
+## References
+
+- [Microsoft Foundry documentation](https://learn.microsoft.com/en-us/azure/ai-foundry/)
+- [Azure Identity for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme)
+- [ServiceNow Developer documentation](https://developer.servicenow.com/)
 - [OWASP GenAI Security Project](https://genai.owasp.org/)
 - [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)
 
 ---
 
-## ⚠️ Project Scope
-
-AgentShield is an independent educational and engineering portfolio project.
-
-Northstar Technologies is a fictional enterprise used to model realistic business requirements and security scenarios.
-
-The project uses synthetic information and simulated business processes. Its architecture and controls are intended to demonstrate engineering practices and should not be interpreted as independently certified or production-ready.
-
----
-
-## 💡 Engineering Philosophy
-
-> **Security should enable innovation, not become a barrier to it.**
-
-Enterprise AI adoption requires more than connecting a language model to company data and APIs.
-
-It requires understanding how identity, authorization, infrastructure, application logic, and security operations work together.
-
-**AgentShield explores what it takes to build AI agents that are not only capable of performing useful work, but are also designed to operate within clearly defined security boundaries.**
+**Engineering focus:** Build useful AI agent capabilities, define their trust boundaries, and verify security behavior rather than assuming the model will enforce it.

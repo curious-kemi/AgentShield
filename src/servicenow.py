@@ -39,41 +39,58 @@ def get_access_token():
     return access_token
 
 #  Build the incident-creation function
-def create_servicenow_incident(short_description, description):
+def create_incident(short_description: str, description: str):
     access_token = get_access_token()
-
-    # Construct incident URL
-    incident_url = f"{instance_url}/api/now/table/incident"
 
     # Prepare incident_data
     incident_data = {
-    "short_description": short_description,
-    "description": description
+        "short_description": short_description,
+        "description": description
     }
 
     # Prepare headers containing access_token
     headers = {
-    "Authorization": f"Bearer {access_token}",
-    "Content-Type": "application/json",
-    "Accept": "application/json"
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
     }
+    
 
-    # Send POST request to ServiceNow
-    incident_response = requests.post(
-    incident_url,
-    headers=headers,
-    json=incident_data,
-    timeout=10
-    )
+    try:
+          # import from the .env file
+        instance_url = os.environ["SERVICENOW_INSTANCE_URL"]
 
-    # Check response
-    incident_response.raise_for_status()
+        incident_url = f"{instance_url}/api/now/table/incident"
 
-    result = incident_response.json().get("result", {})
-    incident_number = result.get("number")
+        # Step 1: Send the POST request to serviceNow
+        incident_response = requests.post(
+            incident_url,
+            headers=headers,
+            json=incident_data,
+            timeout=10
+        )
 
-    # return an error message if no incident number
-    if not incident_number:
-        raise RuntimeError("ServiceNow did not return an incident number")
+        # Step 2: Check the HTTP response
+        incident_response.raise_for_status()
 
-    return incident_number
+        # Step 3: Extract the incident number
+        result = incident_response.json().get("result", {})
+        incident_number = result.get("number")
+
+        # Step 4: Return status/ handle exceptions
+        if incident_number is None:
+                return {
+                    "status": "unknown",
+                    "message": "ServiceNow did not return an incident number"
+                }
+
+        return {
+            "status": "success",
+            "incident_number": incident_number
+        }
+    except requests.exceptions.HTTPError as e:
+         return {
+            "status": "error",
+            "message": "Incident creation failed"
+         }
+       
